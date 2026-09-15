@@ -7,6 +7,8 @@ Live, source-verified, ownerless. Docs for buyers and launchers: [pumppill.org/h
 |---|---|---|
 | `SniperRebateHook` | [`0x2166221791aEe01c88F9d8f8552E31f3266d5044`](https://robinhoodchain.blockscout.com/address/0x2166221791aEe01c88F9d8f8552E31f3266d5044) | Declining early-sell tax that pays the opening buyers who held |
 | `DripVaultFactory` | [`0xCb518EacEda056F329DB95b3aB8065732260850d`](https://robinhoodchain.blockscout.com/address/0xCb518EacEda056F329DB95b3aB8065732260850d) | Creator-allocation escrow with a pool-aware, rate-limited drip |
+| `DripVaultV2Factory` | [`0xA5fE802B0515B6793EdF291eA4E4BB71fd77E0b3`](https://repo.sourcify.dev/4663/0xA5fE802B0515B6793EdF291eA4E4BB71fd77E0b3/) | Same, with per-deposit cliffs and a restricted depositor |
+| `BuyAndEscrowRouter` | [`0xc734b12AAF8aDAf9ff92a7eC24E9214146b8CD32`](https://repo.sourcify.dev/4663/0xc734b12AAF8aDAf9ff92a7eC24E9214146b8CD32/) | Buys a creator's bag and escrows it in one transaction |
 
 Both are immutable: no owner, no upgrades, no pause switch. The only mutable slot in
 either contract is the hook's fee `treasury`, rotatable exclusively by itself.
@@ -69,7 +71,7 @@ vault, and whatever isn't escrowed is visibly un-escrowed.
 - Vaults can also be created unbound (pure time schedule) for non-v4 pools.
 - The factory keeps an enumerable registry (`vaultsByToken`, `allVaults`).
 
-## DripVaultV2 + BuyAndEscrowRouter (source only — not deployed)
+## DripVaultV2 + BuyAndEscrowRouter
 
 Written for a launch flow that puts the **entire fixed supply into the LP position**,
 leaving no reserved creator allocation to escrow. If there is no free allocation, the
@@ -132,6 +134,20 @@ that receives the tokens and from the router that sends the swap. Nothing reads
 
 Feeless on purpose: a fee here would tax the one behaviour the design exists to make
 attractive.
+
+### Verification
+
+Both v2 contracts are verified on **Sourcify** ([factory](https://repo.sourcify.dev/4663/0xA5fE802B0515B6793EdF291eA4E4BB71fd77E0b3/),
+[router](https://repo.sourcify.dev/4663/0xc734b12AAF8aDAf9ff92a7eC24E9214146b8CD32/)), not on Blockscout, and not by choice: the
+per-instance API at `robinhoodchain.blockscout.com` now answers a Cloudflare challenge — which
+is how the v1 contracts were verified in early September, and that route has since closed —
+while the PRO multichain API is read-only (its verification config 404s, a submission 500s).
+Sourcify supports chain 4663 and is what Blockscout's bytecode database imports from, so the
+explorer should catch up on its own schedule.
+
+Neither contract has an owner. The keeper that signed the deployment keeps no power over
+either one: the factory can only deploy vaults, and the router can only swap and deposit into
+a vault that already admits it as its depositor.
 
 ## First live usage (2026-09-03)
 
