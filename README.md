@@ -69,6 +69,70 @@ vault, and whatever isn't escrowed is visibly un-escrowed.
 - Vaults can also be created unbound (pure time schedule) for non-v4 pools.
 - The factory keeps an enumerable registry (`vaultsByToken`, `allVaults`).
 
+## DripVaultV2 + BuyAndEscrowRouter (source only — not deployed)
+
+Written for a launch flow that puts the **entire fixed supply into the LP position**,
+leaving no reserved creator allocation to escrow. If there is no free allocation, the
+creator's bag has to be bought like anyone else's — which is a stronger guarantee than a
+carve-out, because the bag is paid for, but only if the buy and the lock are the same
+transaction. Buying and then choosing whether to lock is a promise; doing both atomically
+is a fact.
+
+To be precise about the mechanics: the buy moves the pool along its curve, changing
+reserves and price. It does **not** mint liquidity and does not add depth. What it
+produces is a paid-for bag that is locked, and that is the entire claim.
+
+### What v2 changes, and why
+
+Two holes in v1, both at the cliff, both harmless when a vault was funded once at launch
+and both serious once funding can land at any time:
+
+- v1 measured the cliff from `createdAt` for **every** deposit, so anything deposited
+  after the cliff had passed was releasable the same day.
+- v1 sized the per-epoch cap off **total** allocation, so a late deposit raised the drip
+  rate on the bag that was already escrowed — and since v1 deposits were permissionless,
+  a third party could do it to someone else's vault.
+
+v2 gives every deposit its own tranche with its own unlock, and makes only matured
+tranches visible to the release path: an immature tranche neither pays out nor raises the
+cap. Maturity rides a forward-only cursor, so each tranche is walked once in its life
+rather than on every call, bounded by a minimum deposit size and a 64-tranche ceiling.
+
+An immutable `depositor` address (normally the router) makes *"every token in here was
+bought on the open market"* a property of the contract rather than a claim about the
+creator. Set it to `address(0)` to allow a community lock alongside the creator's, at the
+cost of the badge meaning exactly one thing.
+
+The dead-pool escape releases immature tranches too. The cliff protects buyers in a live
+market; there is no market left to protect after 30 days of zero liquidity, and burning
+someone's tokens for launching into a pool that died is not a protection.
+
+### BuyAndEscrowRouter
+
+One transaction that either buys and escrows or does neither.
+
+1. **validate** — token is in the pool, the vault is bound to *this* pool, the vault
+   admits this router as its depositor
+2. **swap** — through the ordinary path with the pool's hook attached
+3. **measure** — `received = balanceAfter - balanceBefore`, on the router itself, not a
+   quote and not the swap's reported delta
+4. **guard** — revert unless `received >= minEscrowed`
+5. **escrow** — approve exactly `received`, deposit, re-assert the vault's allocation
+   rose by exactly that, reset the approval to zero
+6. **refund** — return any unspent input to the caller
+
+No `try`/`catch` anywhere on the path: a failed escrow takes the buy down with it, so a
+creator can never end up holding a free-floating bag because the escrow leg reverted
+quietly. Launch guards — anti-snipe caps, opening-window fees — see this buy exactly as
+they see any other; the router asks for no exemption and should never be granted one.
+
+The swap carries the **creator** as beneficiary in `hookData`, distinct from the vault
+that receives the tokens and from the router that sends the swap. Nothing reads
+`tx.origin`.
+
+Feeless on purpose: a fee here would tax the one behaviour the design exists to make
+attractive.
+
 ## First live usage (2026-09-03)
 
 Smoke-test launch exercising every mechanism with real value:
@@ -91,7 +155,7 @@ git clone --depth 1 --recurse-submodules --shallow-submodules \
   https://github.com/Uniswap/v4-periphery lib/v4-periphery
 
 forge build
-forge test --no-match-path "test/Fork.t.sol"   # 40 unit/fuzz tests
+forge test --no-match-path "test/Fork.t.sol"   # 63 unit/fuzz tests
 forge test --match-path "test/Fork.t.sol"      # mainnet-fork rehearsal (needs RPC)
 ```
 
@@ -106,6 +170,10 @@ buy → tax → claim → protocol-fee cycle against Robinhood Chain's live Pool
   claim — approximately net-neutral, since the receiving wallet's sell pays the tax.
 - A creator can escrow only part of their supply; consumers of the vault registry
   should report the escrowed share, not a binary badge (our scanner does).
+- `DripVault` v1 is live and unchanged, and carries the two cliff holes described in the
+  v2 section above. It is left deployed rather than quietly retired because these are
+  immutable contracts and someone may be relying on one; v2 is a new deployment, not an
+  upgrade. New vaults should use v2.
 - Not independently audited. Source is verified and the test suite is public.
 
 ## License
